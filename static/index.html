@@ -53,7 +53,13 @@ $("join").onclick = async () => {
   refresh();
 };
 const steps = c => c.steps.map(s =>
-  `<div class="step"><b>${esc(s.teacher)}</b> teaches <b>${esc(s.learner)}</b> ${s.skills.map(k => `<span class="tag">${esc(k)}</span>`).join("")}</div>`).join("");
+  `<div class="step"><b>${esc(s.teacher)}</b> teaches <b>${esc(s.learner)}</b> ${s.skills.map(k => `<span class="tag">${esc(k)}</span>`).join("")}
+   <button onclick="plan(${s.teacher_id},${s.learner_id},'${esc(s.skills[0]).replace(/'/g, "")}',this)">Starter plan</button></div>`).join("");
+async function plan(t, l, skill, btn) {
+  const p = await api(`/swap-plan?teacher_id=${t}&learner_id=${l}&skill=${encodeURIComponent(skill)}`);
+  btn.insertAdjacentHTML("afterend", `<p><small>${esc(p.plan)} <i>(${p.source})</i></small></p>`);
+  btn.remove();
+}
 $("find").onclick = async () => {
   const id = $("who").value; if (!id) return;
   const m = await api(`/users/${id}/matches`);

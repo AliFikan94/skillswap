@@ -8,6 +8,10 @@ Peer-to-peer skill bartering. Users list what they can teach and what they want 
 
 Sessions can be scheduled, completed (moves credits unless it is a swap) and reviewed.
 
+## Open-source AI
+
+Optional and fully local: set `SKILLSWAP_OLLAMA_URL=http://localhost:11434` (and `SKILLSWAP_MODEL`, default `gemma3`) to run an open-weight model through [Ollama](https://ollama.com). It (1) canonicalizes free-text skills ("I do React stuff" -> "react") so matching works, and (2) writes a starter plan for each swap's first session. Without it the app falls back to plain normalization and a template, so it works offline with no keys and no cost; profile data never leaves the machine.
+
 ## Run
 
     pip install -r requirements.txt

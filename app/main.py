@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import db
+from . import ai, db
 from .matching import Profile, match_for, norm
 
 app = FastAPI(title="SkillSwap")
@@ -62,7 +62,7 @@ def _profiles() -> list[Profile]:
 def create_user(u: UserIn):
     cur = conn.execute("INSERT INTO users (name, bio) VALUES (?, ?)", (u.name.strip(), u.bio))
     for kind, items in (("offer", u.offers), ("want", u.wants)):
-        for s in {norm(x) for x in items if x.strip()}:
+        for s in set(ai.canonicalize(items)):
             conn.execute("INSERT OR IGNORE INTO skills VALUES (?,?,?)", (cur.lastrowid, s, kind))
     conn.commit()
     return _user(cur.lastrowid)
@@ -95,6 +95,11 @@ def credit_options(uid: int):
         if p.id != uid and (p.offers & set(me["wants"])):
             out.append({"teacher_id": p.id, "name": p.name, "skills": sorted(p.offers & set(me["wants"]))})
     return {"balance": me["credits"], "teachers": out}
+
+
+@app.get("/swap-plan")
+def swap_plan(teacher_id: int, learner_id: int, skill: str):
+    return ai.swap_plan(_user(teacher_id)["name"], _user(learner_id)["name"], norm(skill))
 
 
 @app.post("/sessions", status_code=201)

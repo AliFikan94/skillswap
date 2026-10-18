@@ -54,3 +54,16 @@ def test_insufficient_credits_and_validation():
     assert client.post("/sessions", json={**base, "hours": 3}).status_code == 402
     assert client.post("/sessions", json={**base, "skill": "chess", "hours": 1}).status_code == 400
     assert client.post("/sessions", json={**base, "hours": 3, "swap": True}).status_code == 201
+
+
+def test_ai_fallback_and_model(monkeypatch):
+    from app import ai
+    t, l = mk("PT", ["ski"], []), mk("PL", [], ["ski"])
+    plan = client.get("/swap-plan", params={"teacher_id": t["id"], "learner_id": l["id"], "skill": "ski"}).json()
+    assert plan["source"] == "template" and "PT" in plan["plan"]
+
+    monkeypatch.setattr(ai, "_generate", lambda prompt, want_json=False: '{"skills": ["react"]}' if want_json else "Plan!")
+    assert ai.canonicalize(["I do React stuff"]) == ["react"]
+    assert ai.swap_plan("A", "B", "x") == {"plan": "Plan!", "source": "model"}
+    monkeypatch.setattr(ai, "_generate", lambda prompt, want_json=False: "not json")
+    assert ai.canonicalize(["Foo Bar"]) == ["foo bar"]
