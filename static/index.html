@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SkillSwap</title>
+<style>
+  :root { --bg:#fafaf7; --fg:#1d1d1b; --card:#fff; --line:#e3e1d8; --accent:#2f7d5b; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#161715; --fg:#ecebe5; --card:#202220; --line:#34372f; --accent:#5fc296; } }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui,sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:24px 16px; }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:10px; padding:16px; margin:16px 0; }
+  input, button, select { font:inherit; padding:8px 10px; border-radius:6px; border:1px solid var(--line); background:var(--card); color:var(--fg); }
+  button { background:var(--accent); color:#fff; border:0; cursor:pointer; }
+  .row { display:flex; gap:8px; flex-wrap:wrap; margin:6px 0; }
+  .row input { flex:1; min-width:140px; }
+  .tag { display:inline-block; padding:1px 8px; border-radius:99px; background:var(--line); font-size:.85em; margin:2px; }
+  .step { margin:4px 0; }
+</style>
+</head>
+<body>
+<main>
+  <h1>SkillSwap</h1>
+  <p>Trade skills, not cash. Direct swaps, multi-way loops, and time-credits as a fallback.</p>
+
+  <section class="card">
+    <h2>Join</h2>
+    <div class="row"><input id="name" placeholder="Name"><input id="bio" placeholder="One-line bio"></div>
+    <div class="row"><input id="offers" placeholder="I can teach (comma separated)"><input id="wants" placeholder="I want to learn (comma separated)"></div>
+    <button id="join">Create profile</button>
+  </section>
+
+  <section class="card">
+    <h2>Find swaps</h2>
+    <div class="row"><select id="who"></select><button id="find">Find matches</button></div>
+    <div id="results"></div>
+  </section>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+const list = s => s.split(",").map(x => x.trim()).filter(Boolean);
+const esc = s => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = (p, o) => fetch(p, o).then(r => r.json());
+
+async function refresh() {
+  const users = await api("/users");
+  $("who").innerHTML = users.map(u => `<option value="${u.id}">${esc(u.name)} (${u.credits} credits)</option>`).join("");
+}
+$("join").onclick = async () => {
+  await api("/users", { method: "POST", headers: {"Content-Type":"application/json"},
+    body: JSON.stringify({ name: $("name").value, bio: $("bio").value, offers: list($("offers").value), wants: list($("wants").value) }) });
+  ["name","bio","offers","wants"].forEach(i => $(i).value = "");
+  refresh();
+};
+const steps = c => c.steps.map(s =>
+  `<div class="step"><b>${esc(s.teacher)}</b> teaches <b>${esc(s.learner)}</b> ${s.skills.map(k => `<span class="tag">${esc(k)}</span>`).join("")}</div>`).join("");
+$("find").onclick = async () => {
+  const id = $("who").value; if (!id) return;
+  const m = await api(`/users/${id}/matches`);
+  const c = await api(`/users/${id}/credit-options`);
+  $("results").innerHTML =
+    `<h3>Direct swaps (${m.direct.length})</h3>` + (m.direct.map(d => `<div class="card">${steps(d)}</div>`).join("") || "<p>None yet.</p>") +
+    `<h3>Loops (${m.loops.length})</h3>` + (m.loops.map(d => `<div class="card">${steps(d)}</div>`).join("") || "<p>None yet.</p>") +
+    `<h3>Pay with credits (balance ${c.balance})</h3>` + (c.teachers.map(t => `<div>${esc(t.name)}: ${t.skills.map(esc).join(", ")}</div>`).join("") || "<p>No teachers for your wants yet.</p>");
+};
+refresh();
+</script>
+</body>
+</html>
