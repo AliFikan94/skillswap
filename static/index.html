@@ -94,7 +94,7 @@ async function rate(id) {
   if (!(rating >= 1 && rating <= 5)) return;
   const r = await post(`/sessions/${id}/review`, { reviewer_id: +current, rating });
   if (!r.ok) alert((await r.json()).detail);
-  loadSessions();
+  await refresh(); loadSessions();
 }
 async function loadSessions() {
   if (!current) return;
