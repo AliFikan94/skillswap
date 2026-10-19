@@ -35,6 +35,10 @@
     <div class="row"><select id="who"></select><button id="find">Find matches</button></div>
     <div id="results"></div>
   </section>
+  <section class="card" id="sessions-card" hidden>
+    <h2>My sessions</h2>
+    <div id="sessions"></div>
+  </section>
 </main>
 <script>
 const $ = id => document.getElementById(id);
@@ -44,17 +48,20 @@ const api = (p, o) => fetch(p, o).then(r => r.json());
 
 async function refresh() {
   const users = await api("/users");
-  $("who").innerHTML = users.map(u => `<option value="${u.id}">${esc(u.name)} (${u.credits} credits)</option>`).join("");
+  const keep = $("who").value;
+  $("who").innerHTML = users.map(u => `<option value="${u.id}">${esc(u.name)} (${u.credits} credits${u.rating ? ", " + u.rating.toFixed(1) + "★" : ""})</option>`).join("");
+  if (keep) $("who").value = keep;
 }
 $("join").onclick = async () => {
   await api("/users", { method: "POST", headers: {"Content-Type":"application/json"},
     body: JSON.stringify({ name: $("name").value, bio: $("bio").value, offers: list($("offers").value), wants: list($("wants").value) }) });
   ["name","bio","offers","wants"].forEach(i => $(i).value = "");
-  refresh();
+  await refresh();
 };
 const steps = c => c.steps.map(s =>
   `<div class="step"><b>${esc(s.teacher)}</b> teaches <b>${esc(s.learner)}</b> ${s.skills.map(k => `<span class="tag">${esc(k)}</span>`).join("")}
-   <button onclick="plan(${s.teacher_id},${s.learner_id},'${esc(s.skills[0]).replace(/'/g, "")}',this)">Starter plan</button></div>`).join("");
+   <button onclick="plan(${s.teacher_id},${s.learner_id},'${esc(s.skills[0]).replace(/'/g, "")}',this)">Starter plan</button>
+   ${+s.learner_id === +$("who").value ? `<button onclick="book(${s.teacher_id},${s.learner_id},'${esc(s.skills[0]).replace(/'/g, "")}',true)">Book swap</button>` : ""}</div>`).join("");
 async function plan(t, l, skill, btn) {
   const p = await api(`/swap-plan?teacher_id=${t}&learner_id=${l}&skill=${encodeURIComponent(skill)}`);
   btn.insertAdjacentHTML("afterend", `<p><small>${esc(p.plan)} <i>(${p.source})</i></small></p>`);
@@ -67,9 +74,39 @@ $("find").onclick = async () => {
   $("results").innerHTML =
     `<h3>Direct swaps (${m.direct.length})</h3>` + (m.direct.map(d => `<div class="card">${steps(d)}</div>`).join("") || "<p>None yet.</p>") +
     `<h3>Loops (${m.loops.length})</h3>` + (m.loops.map(d => `<div class="card">${steps(d)}</div>`).join("") || "<p>None yet.</p>") +
-    `<h3>Pay with credits (balance ${c.balance})</h3>` + (c.teachers.map(t => `<div>${esc(t.name)}: ${t.skills.map(esc).join(", ")}</div>`).join("") || "<p>No teachers for your wants yet.</p>");
+    `<h3>Pay with credits (balance ${c.balance})</h3>` + (c.teachers.map(t => `<div class="step">${esc(t.name)}: ${t.skills.map(k => `${esc(k)} <button onclick="book(${t.teacher_id},${id},'${esc(k).replace(/'/g, "")}',false)">Book 1h</button>`).join(" ")}</div>`).join("") || "<p>No teachers for your wants yet.</p>");
 };
-refresh();
+let current = null;
+const post = (p, b) => fetch(p, { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify(b || {}) });
+
+async function book(teacher, learner, skill, swap) {
+  const r = await post("/sessions", { teacher_id: teacher, learner_id: learner, skill, hours: 1, swap });
+  if (!r.ok) return alert((await r.json()).detail);
+  loadSessions();
+}
+async function complete(id) {
+  const r = await post(`/sessions/${id}/complete`);
+  if (!r.ok) alert((await r.json()).detail);
+  await refresh(); loadSessions();
+}
+async function rate(id) {
+  const rating = parseInt(prompt("Rating 1-5?"), 10);
+  if (!(rating >= 1 && rating <= 5)) return;
+  const r = await post(`/sessions/${id}/review`, { reviewer_id: +current, rating });
+  if (!r.ok) alert((await r.json()).detail);
+  loadSessions();
+}
+async function loadSessions() {
+  if (!current) return;
+  const rows = await api(`/users/${current}/sessions`);
+  $("sessions-card").hidden = false;
+  $("sessions").innerHTML = rows.map(s => `<div class="step"><b>${esc(s.teacher)}</b> &rarr; <b>${esc(s.learner)}</b>
+    <span class="tag">${esc(s.skill)}</span> ${s.hours}h, ${s.swap ? "swap" : "credits"} &middot; ${esc(s.status)}
+    ${s.status === "scheduled" ? `<button onclick="complete(${s.id})">Mark complete</button>` : ""}
+    ${s.status === "completed" && !s.reviewed ? `<button onclick="rate(${s.id})">Review</button>` : ""}</div>`).join("") || "<p>No sessions yet.</p>";
+}
+$("who").onchange = () => { current = $("who").value; loadSessions(); };
+refresh().then(() => { current = $("who").value; loadSessions(); });
 </script>
 </body>
 </html>

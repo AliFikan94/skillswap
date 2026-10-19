@@ -67,3 +67,14 @@ def test_ai_fallback_and_model(monkeypatch):
     assert ai.swap_plan("A", "B", "x") == {"plan": "Plan!", "source": "model"}
     monkeypatch.setattr(ai, "_generate", lambda prompt, want_json=False: "not json")
     assert ai.canonicalize(["Foo Bar"]) == ["foo bar"]
+
+
+def test_user_sessions_listing():
+    t, l = mk("ST", ["chess"], []), mk("SL", [], ["chess"])
+    s = client.post("/sessions", json={"teacher_id": t["id"], "learner_id": l["id"], "skill": "chess", "hours": 1}).json()
+    rows = client.get(f"/users/{l['id']}/sessions").json()
+    assert rows[0]["id"] == s["id"] and rows[0]["teacher"] == "ST" and rows[0]["reviewed"] == 0
+    client.post(f"/sessions/{s['id']}/complete")
+    client.post(f"/sessions/{s['id']}/review", json={"reviewer_id": l["id"], "rating": 4})
+    assert client.get(f"/users/{l['id']}/sessions").json()[0]["reviewed"] == 1
+    assert client.get("/users/99999/sessions").status_code == 404

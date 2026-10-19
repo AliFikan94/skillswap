@@ -97,6 +97,17 @@ def credit_options(uid: int):
     return {"balance": me["credits"], "teachers": out}
 
 
+@app.get("/users/{uid}/sessions")
+def user_sessions(uid: int):
+    _user(uid)
+    rows = conn.execute(
+        "SELECT s.*, t.name teacher, l.name learner, "
+        "(SELECT COUNT(*) FROM reviews r WHERE r.session_id=s.id AND r.reviewer_id=?) reviewed "
+        "FROM sessions s JOIN users t ON t.id=s.teacher_id JOIN users l ON l.id=s.learner_id "
+        "WHERE s.teacher_id=? OR s.learner_id=? ORDER BY s.id DESC", (uid, uid, uid))
+    return [dict(r) for r in rows]
+
+
 @app.get("/swap-plan")
 def swap_plan(teacher_id: int, learner_id: int, skill: str):
     return ai.swap_plan(_user(teacher_id)["name"], _user(learner_id)["name"], norm(skill))
