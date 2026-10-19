@@ -1,0 +1,19 @@
+# Render Blueprint: https://render.com/docs/blueprint-spec
+services:
+  - type: web
+    name: skillswap
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    # Seeds demo users on first boot (skipped if the database already has users).
+    startCommand: python -m app.seed && python -m uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: SKILLSWAP_COOKIE_SECURE   # Render serves over HTTPS
+        value: "1"
+      # Optional: point at an Ollama server you host (Render cannot reach your laptop).
+      # Without it the app uses exact skill matching and template plans.
+      # - key: SKILLSWAP_OLLAMA_URL
+      #   value: https://your-ollama-host

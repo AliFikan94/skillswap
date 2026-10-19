@@ -37,6 +37,16 @@ Set `SKILLSWAP_DB` to change the SQLite file path. Demo users from `python -m ap
 
 Upgrading from the first version? Existing databases are migrated automatically, but old profiles have no password; delete `skillswap.db` and re-seed for a clean start.
 
+## Deploy to Render
+
+`render.yaml` is a Render Blueprint, so deploying is: push this branch (or merge it), then in Render choose **New → Blueprint**, connect the repo and branch, and apply. The service seeds the demo users on first boot (sign in as `ada@demo.test` / `demo12345`) and serves over HTTPS with a `Secure` session cookie.
+
+Things to know about the free plan:
+- The disk is ephemeral, so the SQLite database resets on every redeploy or restart (and the demo users are re-seeded). For persistent data, attach a Render disk and set `SKILLSWAP_DB` to a path on it, or move to Postgres.
+- The service sleeps after inactivity, so the first request after a pause is slow.
+- Render cannot reach Ollama on your laptop. Without `SKILLSWAP_OLLAMA_URL` the live demo uses exact skill matching and template plans; semantic matching needs an Ollama server you host (for example on a DigitalOcean GPU Droplet).
+- The seeded demo accounts have a public password; do not use the demo database for real users.
+
 ## API
 
 Everything except `/auth/signup` and `/auth/login` requires the session cookie.

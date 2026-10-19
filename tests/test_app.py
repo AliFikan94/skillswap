@@ -220,3 +220,15 @@ def test_semantic_matching_end_to_end(monkeypatch):
     assert opts[0]["name"] == "Sb" and opts[0]["for"] == {"sx-figma": "sx-ui design"}
     # booking works against the teacher's real skill name
     assert a.post("/sessions", json={"teacher_id": b.me["id"], "skill": "sx-figma", "hours": 1, "swap": True}).status_code == 201
+
+
+# ---- deployment ------------------------------------------------------------------
+
+def test_healthz_and_secure_cookie(monkeypatch):
+    c = TestClient(app)
+    assert c.get("/healthz").json() == {"ok": True}
+    body = {"name": "Sec", "email": "sec@x.test", "password": "password123"}
+    assert "secure" not in c.post("/auth/signup", json=body).headers["set-cookie"].lower()
+    monkeypatch.setenv("SKILLSWAP_COOKIE_SECURE", "1")
+    r = c.post("/auth/login", json={"email": "sec@x.test", "password": "password123"})
+    assert "secure" in r.headers["set-cookie"].lower() and "httponly" in r.headers["set-cookie"].lower()

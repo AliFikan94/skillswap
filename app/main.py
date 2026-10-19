@@ -1,3 +1,4 @@
+import os
 import re
 import sqlite3
 from pathlib import Path
@@ -101,7 +102,8 @@ def create_account(u: SignupIn) -> int:
 
 def _login_response(uid: int, response: Response) -> dict:
     response.set_cookie(COOKIE, auth.issue_token(conn, uid), max_age=auth.TOKEN_TTL,
-                        httponly=True, samesite="lax")
+                        httponly=True, samesite="lax",
+                        secure=os.environ.get("SKILLSWAP_COOKIE_SECURE") == "1")
     return _user(uid, private=True)
 
 
@@ -264,6 +266,12 @@ def review(sid: int, r: ReviewIn, uid: int = Depends(current_user)):
     except sqlite3.IntegrityError:
         raise HTTPException(409, "already reviewed")
     conn.commit()
+    return {"ok": True}
+
+
+@app.get("/healthz")
+def healthz():
+    conn.execute("SELECT 1")
     return {"ok": True}
 
 
