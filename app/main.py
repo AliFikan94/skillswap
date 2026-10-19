@@ -7,8 +7,8 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ai, auth, db
-from .matching import Profile, match_for, norm
+from . import ai, auth, db, semantic
+from .matching import Profile, gives, match_for, norm
 
 app = FastAPI(title="SkillSwap")
 conn = db.connect()
@@ -163,21 +163,30 @@ def get_user(uid: int, _: int = Depends(current_user)):
     return _user(uid)
 
 
+def _similar(profiles: list[Profile]):
+    return semantic.make_similar(conn, {s for p in profiles for s in p.offers | p.wants})
+
+
 @app.get("/me/matches")
 def matches(max_loop: int = 4, uid: int = Depends(current_user)):
     profiles = _profiles()
     me_ = next(p for p in profiles if p.id == uid)
-    return match_for(me_, profiles, max(2, min(max_loop, 6)))
+    return match_for(me_, profiles, max(2, min(max_loop, 6)), _similar(profiles))
 
 
 @app.get("/me/credit-options")
 def credit_options(uid: int = Depends(current_user)):
     """Fallback when no swap exists: people who teach something I want, payable in credits."""
     me_ = _user(uid, private=True)
+    profiles = _profiles()
+    mine = next(p for p in profiles if p.id == uid)
+    similar = _similar(profiles)
     out = []
-    for p in _profiles():
-        if p.id != uid and (p.offers & set(me_["wants"])):
-            out.append({"teacher_id": p.id, "name": p.name, "skills": sorted(p.offers & set(me_["wants"]))})
+    for p in profiles:
+        found = gives(p, mine, similar) if p.id != uid else {}
+        if found:
+            out.append({"teacher_id": p.id, "name": p.name, "skills": sorted(found),
+                        "for": {o: w for o, w in found.items() if o != w}})
     return {"balance": me_["credits"], "teachers": out}
 
 

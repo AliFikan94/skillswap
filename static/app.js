@@ -28,6 +28,10 @@ function avatar(name, cls = "") {
 }
 const stars = r => r ? `<span class="stars" title="${r.toFixed(1)} out of 5">${"★".repeat(Math.round(r))}${"☆".repeat(5 - Math.round(r))}</span>` : "";
 const tags = (list, cls = "") => list.map(t => `<span class="tag ${cls}">${esc(t)}</span>`).join("");
+/* skill tags for a match; a fuzzy match shows what it satisfies, e.g. "figma ≈ ui design" */
+const matchTags = (skills, forMap = {}, cls = "") => skills.map(k => forMap[k]
+  ? `<span class="tag ${cls}" title="Matches what is wanted: ${esc(forMap[k])}">${esc(k)} <span class="approx">≈ ${esc(forMap[k])}</span></span>`
+  : `<span class="tag ${cls}">${esc(k)}</span>`).join("");
 const fmtCredits = n => (Math.round(n * 100) / 100).toString();
 
 function sheet(html, onMount) {
@@ -186,18 +190,18 @@ async function discoverView(main) {
     const inn = c.steps.find(s => s.learner_id === me.id), out = c.steps.find(s => s.teacher_id === me.id);
     return `<div class="row"><div class="avatar-pair">${avatar(me.name)}${avatar(inn.teacher)}</div><div class="grow">
       <h3>You ⇄ ${esc(inn.teacher)}</h3>
-      <div class="step small"><b>${esc(inn.teacher)}</b> teaches you ${tags(inn.skills, "accent")}</div>
-      <div class="step small">You teach <b>${esc(inn.teacher)}</b> ${tags(out.skills)}</div><div class="plan-slot"></div></div>
+      <div class="step small"><b>${esc(inn.teacher)}</b> teaches you ${matchTags(inn.skills, inn.for, "accent")}</div>
+      <div class="step small">You teach <b>${esc(inn.teacher)}</b> ${matchTags(out.skills, out.for)}</div><div class="plan-slot"></div></div>
       <div class="actions">${planBtn(inn)}${swapBtns(inn)}</div></div>`;
   };
   const loopCard = c => {
     const inn = c.steps.find(s => s.learner_id === me.id);
     return `<div class="row"><div class="avatar-pair">${c.steps.slice(0, 4).map(s => avatar(s.teacher)).join("")}</div><div class="grow">
       <h3>${c.size}-way loop</h3>
-      ${c.steps.map(s => `<div class="step small"><b>${esc(s.teacher_id === me.id ? "You" : s.teacher)}</b> teaches <b>${esc(s.learner_id === me.id ? "you" : s.learner)}</b> ${tags(s.skills, s.learner_id === me.id ? "accent" : "")}</div>`).join("")}<div class="plan-slot"></div></div>
+      ${c.steps.map(s => `<div class="step small"><b>${esc(s.teacher_id === me.id ? "You" : s.teacher)}</b> ${s.teacher_id === me.id ? "teach" : "teaches"} <b>${esc(s.learner_id === me.id ? "you" : s.learner)}</b> ${matchTags(s.skills, s.for, s.learner_id === me.id ? "accent" : "")}</div>`).join("")}<div class="plan-slot"></div></div>
       <div class="actions">${planBtn(inn)}${swapBtns(inn)}</div></div>`;
   };
-  const creditRow = t => `<div class="row click" data-act="person" data-id="${t.teacher_id}">${avatar(t.name)}<div class="grow"><h3>${esc(t.name)}</h3><div>${tags(t.skills, "accent")}</div></div>
+  const creditRow = t => `<div class="row click" data-act="person" data-id="${t.teacher_id}">${avatar(t.name)}<div class="grow"><h3>${esc(t.name)}</h3><div>${matchTags(t.skills, t.for, "accent")}</div></div>
     <div class="actions">${t.skills.map(s => `<button class="btn" data-act="book" data-teacher="${t.teacher_id}" data-skill="${esc(s)}" data-swap="">Book ${esc(s)} · 1 credit</button>`).join("")}</div></div>`;
 
   const section = (title, items, render, emptyText) => `<div class="group-title">${title}</div><div class="card list">${items.length ? items.map(render).join("") : `<div class="empty">${emptyText}</div>`}</div>`;

@@ -12,7 +12,7 @@ Most side hustles stall on money: you need a logo, a landing page or a tutor bef
 <!-- add GitHub repo link + screenshot/GIF -->
 
 ## How open-source AI is used
-A local open-weight model (Gemma via Ollama) turns messy profile text into canonical skills so matching works, and drafts a first-session plan for each swap. Everything is optional and falls back to deterministic code.
+A local open-weight embedding model (`embeddinggemma` via Ollama) is what makes matching work: it embeds every skill so "ui design" matches "figma" and "I do React stuff" matches "react", which exact string matching can never do. A Gemma chat model also drafts a first-session plan for each swap. Everything falls back to exact matching if the model is off.
 
 ## Why open matters here
 - **Privacy:** profiles describe what people want to learn; with a local model that never leaves their machine.
@@ -20,4 +20,4 @@ A local open-weight model (Gemma via Ollama) turns messy profile text into canon
 - **Swappable:** change `SKILLSWAP_MODEL` to any Ollama model, no code changes.
 
 ## How it works
-Skills form a directed graph (edge A->B when B can teach something A wants). Direct matches are 2-cycles, loops are longer simple cycles found by DFS. See `app/matching.py`.
+Skills form a directed graph (edge A->B when B offers something semantically close to what A wants, cosine similarity over local embeddings). Direct matches are 2-cycles, loops are longer simple cycles found by DFS. See `app/matching.py` and `app/semantic.py`.

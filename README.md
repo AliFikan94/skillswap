@@ -18,7 +18,14 @@ Landing, sign in / sign up, Discover (swaps, loops, credits), People (search and
 
 ## Open-source AI
 
-Optional and fully local: set `SKILLSWAP_OLLAMA_URL=http://localhost:11434` (and `SKILLSWAP_MODEL`, default `gemma3`) to run an open-weight model through [Ollama](https://ollama.com). It (1) canonicalizes free-text skills ("I do React stuff" -> "react") so matching works, and (2) writes a starter plan for each swap's first session. Without it the app falls back to plain normalization and a template, so it works offline with no keys and no cost; profile data never leaves the machine.
+Optional and fully local: run [Ollama](https://ollama.com) and set `SKILLSWAP_OLLAMA_URL=http://localhost:11434`. Two open-weight models do the work:
+
+- **Semantic matching** (`app/semantic.py`): skill names are embedded with `embeddinggemma` (change with `SKILLSWAP_EMBED_MODEL`), so "ui design" matches "figma". Two skills match when cosine similarity is at least `SKILLSWAP_SIM_THRESHOLD` (default 0.75). Matches that are not exact show up as `figma ≈ ui design` in the UI. Vectors are cached in SQLite, so each skill is embedded once.
+- **Text generation** (`app/ai.py`): a Gemma chat model (`SKILLSWAP_MODEL`, default `gemma3`) canonicalizes free-text skills and writes a starter plan for each swap.
+
+Setup: `ollama pull embeddinggemma && ollama pull gemma3`.
+
+Without a model (or if it goes down; failures trip a 30 s circuit breaker) the app falls back to exact matching and a template plan, so it works offline with no keys and no cost, and profile data never leaves the machine. The default threshold is a starting point: tune it by looking at which pairs you want matched.
 
 ## Run
 

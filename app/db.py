@@ -6,6 +6,9 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT DEFAULT '',
   credits REAL NOT NULL DEFAULT 2
 );
+CREATE TABLE IF NOT EXISTS skill_vectors (
+  skill TEXT NOT NULL, model TEXT NOT NULL, vec TEXT NOT NULL, PRIMARY KEY (skill, model)
+);
 CREATE TABLE IF NOT EXISTS auth_tokens (
   token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
   expires_at REAL NOT NULL
