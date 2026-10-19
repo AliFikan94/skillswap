@@ -1,28 +1,45 @@
+import re
+import sqlite3
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
-from . import ai, db
+from . import ai, auth, db
 from .matching import Profile, match_for, norm
 
 app = FastAPI(title="SkillSwap")
 conn = db.connect()
 STATIC = Path(__file__).parent.parent / "static"
+EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+COOKIE = "session"
 
 
-class UserIn(BaseModel):
-    name: str = Field(min_length=1)
-    bio: str = ""
+class SignupIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
+    email: str = Field(max_length=200)
+    password: str = Field(min_length=8, max_length=200)
+    bio: str = Field(default="", max_length=300)
     offers: list[str] = []
     wants: list[str] = []
 
 
+class LoginIn(BaseModel):
+    email: str
+    password: str
+
+
+class ProfileIn(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=80)
+    bio: str | None = Field(default=None, max_length=300)
+    offers: list[str] | None = None
+    wants: list[str] | None = None
+
+
 class SessionIn(BaseModel):
     teacher_id: int
-    learner_id: int
     skill: str
     hours: float = Field(gt=0, le=8)
     scheduled_for: str | None = None
@@ -30,9 +47,8 @@ class SessionIn(BaseModel):
 
 
 class ReviewIn(BaseModel):
-    reviewer_id: int
     rating: int = Field(ge=1, le=5)
-    comment: str = ""
+    comment: str = Field(default="", max_length=500)
 
 
 def _skills(uid: int, kind: str) -> list[str]:
@@ -40,66 +56,135 @@ def _skills(uid: int, kind: str) -> list[str]:
     return [r["skill"] for r in rows]
 
 
-def _user(uid: int) -> dict:
-    row = conn.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+def _user(uid: int, private: bool = False) -> dict:
+    row = conn.execute("SELECT id, name, bio, credits, email FROM users WHERE id=?", (uid,)).fetchone()
     if not row:
         raise HTTPException(404, "user not found")
     rating = conn.execute(
         "SELECT AVG(r.rating) a, COUNT(*) n FROM reviews r JOIN sessions s ON s.id=r.session_id "
         "WHERE s.teacher_id=? AND r.reviewer_id=s.learner_id", (uid,)).fetchone()
-    return {**dict(row), "offers": _skills(uid, "offer"), "wants": _skills(uid, "want"),
-            "rating": rating["a"], "reviews": rating["n"]}
-
-
-def _profiles() -> list[Profile]:
-    out = []
-    for r in conn.execute("SELECT id, name FROM users"):
-        out.append(Profile(r["id"], r["name"], set(_skills(r["id"], "offer")), set(_skills(r["id"], "want"))))
+    out = {"id": row["id"], "name": row["name"], "bio": row["bio"],
+           "offers": _skills(uid, "offer"), "wants": _skills(uid, "want"),
+           "rating": rating["a"], "reviews": rating["n"]}
+    if private:  # only the account owner sees balance and email
+        out.update(credits=row["credits"], email=row["email"])
     return out
 
 
-@app.post("/users", status_code=201)
-def create_user(u: UserIn):
-    cur = conn.execute("INSERT INTO users (name, bio) VALUES (?, ?)", (u.name.strip(), u.bio))
-    for kind, items in (("offer", u.offers), ("want", u.wants)):
-        for s in set(ai.canonicalize(items)):
-            conn.execute("INSERT OR IGNORE INTO skills VALUES (?,?,?)", (cur.lastrowid, s, kind))
-    conn.commit()
-    return _user(cur.lastrowid)
+def current_user(request: Request) -> int:
+    uid = auth.user_for_token(conn, request.cookies.get(COOKIE))
+    if uid is None:
+        raise HTTPException(401, "not signed in")
+    return uid
 
+
+def _set_skills(uid: int, kind: str, items: list[str]):
+    conn.execute("DELETE FROM skills WHERE user_id=? AND kind=?", (uid, kind))
+    for s in set(ai.canonicalize(items)):
+        conn.execute("INSERT OR IGNORE INTO skills VALUES (?,?,?)", (uid, s, kind))
+
+
+def create_account(u: SignupIn) -> int:
+    email = u.email.strip().lower()
+    if not EMAIL.match(email):
+        raise HTTPException(422, "enter a valid email address")
+    try:
+        cur = conn.execute("INSERT INTO users (name, bio, email, password_hash) VALUES (?,?,?,?)",
+                           (u.name.strip(), u.bio, email, auth.hash_password(u.password)))
+    except sqlite3.IntegrityError:
+        raise HTTPException(409, "an account with that email already exists")
+    _set_skills(cur.lastrowid, "offer", u.offers)
+    _set_skills(cur.lastrowid, "want", u.wants)
+    conn.commit()
+    return cur.lastrowid
+
+
+def _login_response(uid: int, response: Response) -> dict:
+    response.set_cookie(COOKIE, auth.issue_token(conn, uid), max_age=auth.TOKEN_TTL,
+                        httponly=True, samesite="lax")
+    return _user(uid, private=True)
+
+
+def _profiles() -> list[Profile]:
+    return [Profile(r["id"], r["name"], set(_skills(r["id"], "offer")), set(_skills(r["id"], "want")))
+            for r in conn.execute("SELECT id, name FROM users")]
+
+
+# ---- auth ---------------------------------------------------------------
+
+@app.post("/auth/signup", status_code=201)
+def signup(u: SignupIn, response: Response):
+    return _login_response(create_account(u), response)
+
+
+@app.post("/auth/login")
+def login(body: LoginIn, response: Response):
+    row = conn.execute("SELECT id, password_hash FROM users WHERE email=?", (body.email.strip().lower(),)).fetchone()
+    if not auth.verify_password(body.password, row["password_hash"] if row else None):
+        raise HTTPException(401, "incorrect email or password")
+    return _login_response(row["id"], response)
+
+
+@app.post("/auth/logout")
+def logout(request: Request, response: Response):
+    auth.revoke_token(conn, request.cookies.get(COOKIE))
+    response.delete_cookie(COOKIE)
+    return {"ok": True}
+
+
+@app.get("/me")
+def me(uid: int = Depends(current_user)):
+    return _user(uid, private=True)
+
+
+@app.patch("/me")
+def update_me(p: ProfileIn, uid: int = Depends(current_user)):
+    if p.name is not None:
+        conn.execute("UPDATE users SET name=? WHERE id=?", (p.name.strip(), uid))
+    if p.bio is not None:
+        conn.execute("UPDATE users SET bio=? WHERE id=?", (p.bio, uid))
+    if p.offers is not None:
+        _set_skills(uid, "offer", p.offers)
+    if p.wants is not None:
+        _set_skills(uid, "want", p.wants)
+    conn.commit()
+    return _user(uid, private=True)
+
+
+# ---- people & matching --------------------------------------------------
 
 @app.get("/users")
-def list_users():
-    return [_user(r["id"]) for r in conn.execute("SELECT id FROM users ORDER BY id")]
+def list_users(_: int = Depends(current_user)):
+    return [_user(r["id"]) for r in conn.execute("SELECT id FROM users ORDER BY name")]
 
 
 @app.get("/users/{uid}")
-def get_user(uid: int):
+def get_user(uid: int, _: int = Depends(current_user)):
     return _user(uid)
 
 
-@app.get("/users/{uid}/matches")
-def matches(uid: int, max_loop: int = 4):
-    _user(uid)
+@app.get("/me/matches")
+def matches(max_loop: int = 4, uid: int = Depends(current_user)):
     profiles = _profiles()
-    me = next(p for p in profiles if p.id == uid)
-    return match_for(me, profiles, max(2, min(max_loop, 6)))
+    me_ = next(p for p in profiles if p.id == uid)
+    return match_for(me_, profiles, max(2, min(max_loop, 6)))
 
 
-@app.get("/users/{uid}/credit-options")
-def credit_options(uid: int):
+@app.get("/me/credit-options")
+def credit_options(uid: int = Depends(current_user)):
     """Fallback when no swap exists: people who teach something I want, payable in credits."""
-    me = _user(uid)
+    me_ = _user(uid, private=True)
     out = []
     for p in _profiles():
-        if p.id != uid and (p.offers & set(me["wants"])):
-            out.append({"teacher_id": p.id, "name": p.name, "skills": sorted(p.offers & set(me["wants"]))})
-    return {"balance": me["credits"], "teachers": out}
+        if p.id != uid and (p.offers & set(me_["wants"])):
+            out.append({"teacher_id": p.id, "name": p.name, "skills": sorted(p.offers & set(me_["wants"]))})
+    return {"balance": me_["credits"], "teachers": out}
 
 
-@app.get("/users/{uid}/sessions")
-def user_sessions(uid: int):
-    _user(uid)
+# ---- sessions -----------------------------------------------------------
+
+@app.get("/me/sessions")
+def my_sessions(uid: int = Depends(current_user)):
     rows = conn.execute(
         "SELECT s.*, t.name teacher, l.name learner, "
         "(SELECT COUNT(*) FROM reviews r WHERE r.session_id=s.id AND r.reviewer_id=?) reviewed "
@@ -109,15 +194,18 @@ def user_sessions(uid: int):
 
 
 @app.get("/swap-plan")
-def swap_plan(teacher_id: int, learner_id: int, skill: str):
+def swap_plan(teacher_id: int, learner_id: int, skill: str, uid: int = Depends(current_user)):
+    if uid not in (teacher_id, learner_id):
+        raise HTTPException(403, "not a participant")
     return ai.swap_plan(_user(teacher_id)["name"], _user(learner_id)["name"], norm(skill))
 
 
 @app.post("/sessions", status_code=201)
-def create_session(s: SessionIn):
-    if s.teacher_id == s.learner_id:
-        raise HTTPException(400, "teacher and learner must differ")
-    teacher, learner = _user(s.teacher_id), _user(s.learner_id)
+def create_session(s: SessionIn, uid: int = Depends(current_user)):
+    """The signed-in user is always the learner and books a session with a teacher."""
+    if s.teacher_id == uid:
+        raise HTTPException(400, "you can't book yourself")
+    teacher, learner = _user(s.teacher_id), _user(uid, private=True)
     skill = norm(s.skill)
     if skill not in teacher["offers"]:
         raise HTTPException(400, "teacher does not offer that skill")
@@ -125,19 +213,28 @@ def create_session(s: SessionIn):
         raise HTTPException(402, "insufficient credits")
     cur = conn.execute(
         "INSERT INTO sessions (teacher_id, learner_id, skill, hours, scheduled_for, swap) VALUES (?,?,?,?,?,?)",
-        (s.teacher_id, s.learner_id, skill, s.hours, s.scheduled_for, int(s.swap)))
+        (s.teacher_id, uid, skill, s.hours, s.scheduled_for, int(s.swap)))
     conn.commit()
     return dict(conn.execute("SELECT * FROM sessions WHERE id=?", (cur.lastrowid,)).fetchone())
 
 
-@app.post("/sessions/{sid}/complete")
-def complete_session(sid: int):
+def _participant_session(sid: int, uid: int):
     row = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
     if not row:
         raise HTTPException(404, "session not found")
+    if uid not in (row["teacher_id"], row["learner_id"]):
+        raise HTTPException(403, "not a participant")
+    return row
+
+
+@app.post("/sessions/{sid}/complete")
+def complete_session(sid: int, uid: int = Depends(current_user)):
+    row = _participant_session(sid, uid)
     if row["status"] != "scheduled":
         raise HTTPException(409, f"session already {row['status']}")
     if not row["swap"]:
+        if uid != row["learner_id"]:
+            raise HTTPException(403, "only the learner confirms a paid session")
         bal = conn.execute("SELECT credits FROM users WHERE id=?", (row["learner_id"],)).fetchone()["credits"]
         if bal < row["hours"]:
             raise HTTPException(402, "insufficient credits")
@@ -149,17 +246,13 @@ def complete_session(sid: int):
 
 
 @app.post("/sessions/{sid}/review", status_code=201)
-def review(sid: int, r: ReviewIn):
-    row = conn.execute("SELECT * FROM sessions WHERE id=?", (sid,)).fetchone()
-    if not row:
-        raise HTTPException(404, "session not found")
+def review(sid: int, r: ReviewIn, uid: int = Depends(current_user)):
+    row = _participant_session(sid, uid)
     if row["status"] != "completed":
         raise HTTPException(409, "session not completed")
-    if r.reviewer_id not in (row["teacher_id"], row["learner_id"]):
-        raise HTTPException(403, "not a participant")
     try:
-        conn.execute("INSERT INTO reviews VALUES (?,?,?,?)", (sid, r.reviewer_id, r.rating, r.comment))
-    except Exception:
+        conn.execute("INSERT INTO reviews VALUES (?,?,?,?)", (sid, uid, r.rating, r.comment))
+    except sqlite3.IntegrityError:
         raise HTTPException(409, "already reviewed")
     conn.commit()
     return {"ok": True}

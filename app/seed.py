@@ -1,5 +1,5 @@
-"""Populate a demo database: python -m app.seed"""
-from .main import conn, create_user, UserIn
+"""Populate a demo database: python -m app.seed   (all demo passwords: demo12345)"""
+from .main import SignupIn, conn, create_account
 
 DEMO = [
     ("Ada", "Graphic designer", ["logo design", "figma"], ["python", "landing page"]),
@@ -15,8 +15,9 @@ def run():
         print("database not empty, skipping")
         return
     for name, bio, offers, wants in DEMO:
-        create_user(UserIn(name=name, bio=bio, offers=offers, wants=wants))
-    print(f"seeded {len(DEMO)} users")
+        create_account(SignupIn(name=name, email=f"{name.lower()}@demo.test", password="demo12345",
+                                bio=bio, offers=offers, wants=wants))
+    print(f"seeded {len(DEMO)} users, sign in as ada@demo.test / demo12345")
 
 
 if __name__ == "__main__":

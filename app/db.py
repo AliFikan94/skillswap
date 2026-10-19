@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS users (
   id INTEGER PRIMARY KEY, name TEXT NOT NULL, bio TEXT DEFAULT '',
   credits REAL NOT NULL DEFAULT 2
 );
+CREATE TABLE IF NOT EXISTS auth_tokens (
+  token_hash TEXT PRIMARY KEY, user_id INTEGER NOT NULL REFERENCES users(id),
+  expires_at REAL NOT NULL
+);
 CREATE TABLE IF NOT EXISTS skills (
   user_id INTEGER NOT NULL REFERENCES users(id),
   skill TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('offer','want')),
@@ -29,4 +33,11 @@ def connect() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
     conn.executescript(SCHEMA)
+    # Databases created before accounts existed lack these columns.
+    cols = {r["name"] for r in conn.execute("PRAGMA table_info(users)")}
+    for col in ("email", "password_hash"):
+        if col not in cols:
+            conn.execute(f"ALTER TABLE users ADD COLUMN {col} TEXT")
+    conn.execute("CREATE UNIQUE INDEX IF NOT EXISTS users_email ON users(email)")
+    conn.commit()
     return conn
